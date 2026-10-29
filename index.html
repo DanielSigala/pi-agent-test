@@ -29,6 +29,8 @@
 <body>
 <div id="wrap">
   <canvas id="game" width="400" height="600"></canvas>
+  <img id="rowdy" src="assets/rowdy.gif" alt="Rowdy the Roadrunner"
+       style="position:absolute; width:64px; height:64px; left:0; top:0; pointer-events:none; display:none;">
   <div id="hint">Click / Tap / Space to flap</div>
 </div>
 <script>
@@ -46,10 +48,14 @@
   const PIPE_SPACING = 220;      // horizontal distance between pipes
   const GROUND_H = 70;
   const BIRD_X = 100;
-  const BIRD_R = 16;             // hitbox radius (a bit forgiving)
+  const BIRD_R = 20;             // hitbox radius (forgiving vs the 64px sprite)
 
   const CRIMSON = '#b3111b';     // UTSA crimson
   const GRAY = '#6d6e71';        // UTSA gray
+
+  // Rowdy sprite (UTSA official GIF); drawn roadrunner used as fallback
+  const rowdyImg = new Image();
+  rowdyImg.src = 'assets/rowdy.gif';
 
   const state = {
     running: false,
@@ -204,13 +210,15 @@
     ctx.strokeRect(x, y, PIPE_W, h);
   }
 
-  // Rowdy the Roadrunner (UTSA mascot): white body, gray wing, crimson headband
   function drawRowdy() {
     const b = state.bird;
     ctx.save();
     ctx.translate(BIRD_X, b.y);
     ctx.rotate(b.rot);
 
+    if (rowdyImg.complete && rowdyImg.naturalWidth > 0) return; // sprite shown via animated <img> overlay
+
+    // fallback: white body, gray wing, crimson headband
     // tail
     ctx.fillStyle = '#e8e8e8';
     ctx.beginPath();
@@ -321,11 +329,20 @@
     }
   }
 
+  const rowdyEl = document.getElementById('rowdy');
   function frame() {
     ctx.clearRect(0, 0, W, H);
     drawBackground();
     drawPipes();
     drawRowdy();
+    const b = state.bird;
+    const hasSprite = rowdyImg.complete && rowdyImg.naturalWidth > 0;
+    if (hasSprite) {
+      rowdyEl.style.display = 'block';
+      rowdyEl.style.transform = `translate(${BIRD_X - 32}px, ${b.y - 32}px) rotate(${b.rot}rad)`;
+    } else {
+      rowdyEl.style.display = 'none';
+    }
     drawHUD();
   }
 
