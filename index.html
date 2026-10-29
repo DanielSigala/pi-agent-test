@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rowdy Flaps — UTSA Flappy Bird</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #1a1a1a;
+    display: flex; align-items: center; justify-content: center;
+    font-family: system-ui, sans-serif;
+  }
+  #wrap { position: relative; }
+  canvas {
+    display: block;
+    border: 4px solid #b3111b;
+    border-radius: 8px;
+    box-shadow: 0 0 40px rgba(179, 17, 27, 0.4);
+    background: #7ec8e3;
+  }
+  #hint {
+    position: absolute; bottom: 8px; left: 0; right: 0;
+    text-align: center; color: rgba(255,255,255,0.85);
+    font-size: 13px; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="400" height="600"></canvas>
+  <div id="hint">Click / Tap / Space to flap</div>
+</div>
+<script>
+(() => {
+  const cvs = document.getElementById('game');
+  const ctx = cvs.getContext('2d');
+  const W = cvs.width, H = cvs.height;
+
+  // ---- Tunables ----
+  const GRAVITY = 1400;          // px/s^2
+  const FLAP_VY = -420;          // px/s
+  const PIPE_SPEED = 160;        // px/s
+  const PIPE_GAP = 165;          // px
+  const PIPE_W = 64;
+  const PIPE_SPACING = 220;      // horizontal distance between pipes
+  const GROUND_H = 70;
+  const BIRD_X = 100;
+  const BIRD_R = 16;             // hitbox radius (a bit forgiving)
+
+  const CRIMSON = '#b3111b';     // UTSA crimson
+  const GRAY = '#6d6e71';        // UTSA gray
+
+  const state = {
+    running: false,
+    over: false,
+    score: 0,
+    best: +(localStorage.getItem('rowdy-best') || 0),
+    t: 0,
+    bird: { y: H / 2, vy: 0, rot: 0, flap: 0 },
+    pipes: [],
+    clouds: [
+      { x: 60, y: 80, s: 1.0 },
+      { x: 250, y: 160, s: 0.7 },
+      { x: 340, y: 60, s: 0.85 },
+    ],
+    groundX: 0,
+  };
+
+  function reset() {
+    state.running = true;
+    state.over = false;
+    state.score = 0;
+    state.bird = { y: H / 2, vy: 0, rot: 0, flap: 0 };
+    state.pipes = [];
+    spawnPipe(W + 100);
+  }
+
+  function spawnPipe(x) {
+    const margin = 60;
+    const topH = margin + Math.random() * (H - GROUND_H - PIPE_GAP - margin * 2);
+    state.pipes.push({ x, topH, passed: false });
+  }
+
+  function flap() {
+    if (!state.running) { reset(); return; }
+    if (state.over) return;
+    state.bird.vy = FLAP_VY;
+    state.bird.flap = 0.18; // wing-up timer
+  }
+
+  // ---- Input ----
+  const keys = new Set();
+  addEventListener('keydown', (e) => {
+    if (e.code === 'Space') { e.preventDefault(); if (!keys.has('Space')) flap(); keys.add('Space'); }
+    if (e.code === 'KeyR' && state.over) reset();
+  });
+  addEventListener('keyup', (e) => { if (e.code === 'Space') keys.delete('Space'); });
+  cvs.addEventListener('pointerdown', (e) => { e.preventDefault(); flap(); });
+
+  // ---- Update ----
+  function update(dt) {
+    const b = state.bird;
+    b.vy += GRAVITY * dt;
+    b.y += b.vy * dt;
+    b.rot = Math.max(-0.5, Math.min(1.2, b.vy / 500));
+    b.flap = Math.max(0, b.flap - dt);
+
+    state.groundX = (state.groundX + PIPE_SPEED * dt) % 24;
+
+    for (const c of state.clouds) {
+      c.x -= PIPE_SPEED * 0.25 * c.s * dt;
+      if (c.x < -80) c.x = W + 80;
+    }
+
+    if (state.over) return;
+
+    for (const p of state.pipes) {
+      p.x -= PIPE_SPEED * dt;
+      if (!p.passed && p.x + PIPE_W < BIRD_X) {
+        p.passed = true;
+        state.score++;
+      }
+    }
+    state.pipes = state.pipes.filter((p) => p.x > -PIPE_W - 10);
+    const last = state.pipes[state.pipes.length - 1];
+    if (!last || last.x < W - PIPE_SPACING) spawnPipe(Math.max(W + 10, last ? last.x + PIPE_SPACING : W + 10));
+
+    // collisions
+    if (b.y + BIRD_R > H - GROUND_H || b.y - BIRD_R < 0) {
+      return gameOver();
+    }
+    for (const p of state.pipes) {
+      const withinX = BIRD_X + BIRD_R > p.x && BIRD_X - BIRD_R < p.x + PIPE_W;
+      if (withinX && (b.y - BIRD_R < p.topH || b.y + BIRD_R > p.topH + PIPE_GAP)) {
+        return gameOver();
+      }
+    }
+  }
+
+  function gameOver() {
+    state.over = true;
+    state.running = false;
+    if (state.score > state.best) {
+      state.best = state.score;
+      localStorage.setItem('rowdy-best', String(state.best));
+    }
+  }
+
+  // ---- Drawing ----
+  function drawBackground() {
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#8fd3f4');
+    sky.addColorStop(1, '#d8f1fb');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, H);
+
+    // clouds
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    for (const c of state.clouds) {
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, 34 * c.s, 16 * c.s, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x + 22 * c.s, c.y - 8 * c.s, 24 * c.s, 14 * c.s, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x - 22 * c.s, c.y - 4 * c.s, 20 * c.s, 12 * c.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ground
+    ctx.fillStyle = '#7a9b3e';
+    ctx.fillRect(0, H - GROUND_H, W, GROUND_H);
+    ctx.fillStyle = '#8fb84a';
+    for (let x = -24 + (-state.groundX); x < W + 24; x += 24) {
+      ctx.beginPath();
+      ctx.moveTo(x, H - GROUND_H);
+      ctx.lineTo(x + 12, H - GROUND_H - 8);
+      ctx.lineTo(x + 24, H - GROUND_H);
+      ctx.fill();
+    }
+  }
+
+  function drawPipes() {
+    for (const p of state.pipes) {
+      drawPipe(p.x, 0, p.topH, true);
+      drawPipe(p.x, p.topH + PIPE_GAP, H - GROUND_H - (p.topH + PIPE_GAP), false);
+    }
+  }
+
+  function drawPipe(x, y, h, top) {
+    if (h <= 0) return;
+    const g = ctx.createLinearGradient(x, 0, x + PIPE_W, 0);
+    g.addColorStop(0, '#4c8c2b');
+    g.addColorStop(0.5, '#6fb53f');
+    g.addColorStop(1, '#4c8c2b');
+    ctx.fillStyle = g;
+    ctx.fillRect(x, y, PIPE_W, h);
+    // cap
+    const capH = 22;
+    const capY = top ? y + h - capH : y;
+    ctx.fillStyle = '#5aa333';
+    ctx.fillRect(x - 4, capY, PIPE_W + 8, capH);
+    ctx.strokeStyle = '#2f5e1a';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x - 4, capY, PIPE_W + 8, capH);
+    ctx.strokeRect(x, y, PIPE_W, h);
+  }
+
+  // Rowdy the Roadrunner (UTSA mascot): white body, gray wing, crimson headband
+  function drawRowdy() {
+    const b = state.bird;
+    ctx.save();
+    ctx.translate(BIRD_X, b.y);
+    ctx.rotate(b.rot);
+
+    // tail
+    ctx.fillStyle = '#e8e8e8';
+    ctx.beginPath();
+    ctx.moveTo(-12, 0);
+    ctx.lineTo(-30, -8);
+    ctx.lineTo(-27, 0);
+    ctx.lineTo(-30, 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#999';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // body (white roadrunner)
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 17, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // wing — flaps up briefly after a flap
+    const wingUp = b.flap > 0;
+    ctx.fillStyle = GRAY;
+    ctx.beginPath();
+    if (wingUp) {
+      ctx.ellipse(-2, -10, 12, 7, -0.5, 0, Math.PI * 2);
+    } else {
+      ctx.ellipse(-3, 1, 11, 6, 0.25, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // head
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(13, -8, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // headband (crimson)
+    ctx.fillStyle = CRIMSON;
+    ctx.beginPath();
+    ctx.arc(13, -8, 10, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.lineTo(13, -8);
+    ctx.closePath();
+    ctx.fill();
+    // headband tail
+    ctx.fillRect(-1, -18, 8, 5);
+
+    // beak (long orange roadrunner beak)
+    ctx.fillStyle = '#f5a623';
+    ctx.beginPath();
+    ctx.moveTo(21, -9);
+    ctx.lineTo(34, -6);
+    ctx.lineTo(21, -3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#c77f12';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // eye
+    ctx.fillStyle = '#111';
+    ctx.beginPath();
+    ctx.arc(16, -10, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // legs
+    ctx.strokeStyle = '#f5a623';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(2, 12); ctx.lineTo(2, 19);
+    ctx.moveTo(9, 11); ctx.lineTo(9, 18);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawHUD() {
+    ctx.textAlign = 'center';
+    if (state.running && !state.over) {
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.font = 'bold 48px system-ui';
+      ctx.fillText(state.score, W / 2, 70);
+    }
+    if (!state.running || state.over) {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(40, H / 2 - 90, W - 80, 170);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 30px system-ui';
+      ctx.fillText(state.over ? 'GAME OVER' : 'ROWDY FLAPS', W / 2, H / 2 - 45);
+      ctx.font = '18px system-ui';
+      ctx.fillText(state.over ? `Score: ${state.score}   Best: ${state.best}` : 'Tap / Space to start', W / 2, H / 2);
+      if (state.over) {
+        ctx.fillStyle = CRIMSON;
+        ctx.font = 'bold 15px system-ui';
+        ctx.fillText('Press R or tap to go again', W / 2, H / 2 + 40);
+      }
+      ctx.fillStyle = '#ffd700';
+      ctx.font = 'bold 15px system-ui';
+      ctx.fillText('UTSA Rowdy Edition', W / 2, H / 2 + (state.over ? 65 : 40));
+    }
+  }
+
+  function frame() {
+    ctx.clearRect(0, 0, W, H);
+    drawBackground();
+    drawPipes();
+    drawRowdy();
+    drawHUD();
+  }
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min((now - last) / 1000, 0.033);
+    last = now;
+    update(dt);
+    frame();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
